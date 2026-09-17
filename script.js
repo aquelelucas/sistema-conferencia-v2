@@ -1,5 +1,4 @@
-const API_URL = 'https://script.google.com/macros/s/AKfycbxnoQ8Nm9-ZsyPk0n_QKb_PFbCiutRuuOm7lJaQv4Cix_BmLh2X5xdZU_-BstX8k_AWYA/exec';
-const CHAVE_API = 'KING-CONFERENCIA-2026';
+const API_URL = 'https://script.google.com/macros/s/AKfycbz4OKeJ3nogUAQA1der8lJY7oCySZszZtfrUQmQQ9c5Wz63IQz1_zy3rneSFSRCgkNI_A/exec';
 
 let sessao = null;
 let nomeConferente = null;
@@ -21,7 +20,6 @@ window.addEventListener('DOMContentLoaded', () => {
   $('pedido')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') buscarPedido();
   });
-
   $('sku')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') adicionarItem();
   });
@@ -30,50 +28,34 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 async function chamarAPI(acao, dados = {}) {
-  const corpo = {
-    chave: CHAVE_API,
-    acao,
-    ...dados
-  };
-
   const resposta = await fetch(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(corpo)
+    body: JSON.stringify({ acao, ...dados })
   });
 
   const texto = await resposta.text();
-
-  let resultado;
   try {
-    resultado = JSON.parse(texto);
+    return JSON.parse(texto);
   } catch {
     throw new Error('A API retornou uma resposta inválida.');
   }
-
-  return resultado;
 }
 
 async function carregarConferentes() {
   setStatus('statusLogin', 'Carregando conferentes...');
-
   try {
-    const resultado = await chamarAPI('conferentes');
-
-    if (!resultado.sucesso) {
-      throw new Error(resultado.mensagem || 'Não foi possível carregar os conferentes.');
-    }
+    const resultado = await chamarAPI('listarConferentes');
+    if (!resultado.ok) throw new Error(resultado.erro || 'Não foi possível carregar os conferentes.');
 
     const select = $('conferente');
     select.innerHTML = '<option value="">Selecione seu nome</option>';
-
     (resultado.conferentes || []).forEach(nome => {
       const option = document.createElement('option');
       option.value = nome;
       option.textContent = nome;
       select.appendChild(option);
     });
-
     setStatus('statusLogin', '');
   } catch (erro) {
     setStatus('statusLogin', erro.message, 'error');
@@ -82,7 +64,6 @@ async function carregarConferentes() {
 
 async function fazerLogin() {
   const conferente = $('conferente').value;
-
   if (!conferente) {
     setStatus('statusLogin', 'Selecione o conferente.', 'error');
     return;
@@ -91,25 +72,16 @@ async function fazerLogin() {
   const botao = $('btnEntrar');
   botao.disabled = true;
   botao.textContent = 'Entrando...';
-  setStatus('statusLogin', '');
 
   try {
     const resultado = await chamarAPI('login', { conferente });
-
-    if (!resultado.sucesso) {
-      throw new Error(resultado.mensagem || 'Não foi possível entrar.');
-    }
-
-    if (!resultado.sessao) {
-      throw new Error('A API não criou a sessão do conferente.');
-    }
+    if (!resultado.ok) throw new Error(resultado.erro || 'Não foi possível entrar.');
+    if (!resultado.sessao) throw new Error('A API não criou a sessão do conferente.');
 
     sessao = resultado.sessao;
-    nomeConferente = resultado.nomeConferente || resultado.conferente || conferente;
-
+    nomeConferente = resultado.conferente || conferente;
     sessionStorage.setItem('sessaoConferencia', sessao);
     sessionStorage.setItem('nomeConferente', nomeConferente);
-
     mostrarSistema();
   } catch (erro) {
     setStatus('statusLogin', erro.message, 'error');
@@ -129,10 +101,10 @@ function mostrarSistema() {
 function sair() {
   sessao = null;
   nomeConferente = null;
-  sessionStorage.removeItem('sessaoConferencia');
-  sessionStorage.removeItem('nomeConferente');
   itens = [];
   pedidoAtual = '';
+  sessionStorage.removeItem('sessaoConferencia');
+  sessionStorage.removeItem('nomeConferente');
 
   $('telaSistema').style.display = 'none';
   $('telaLogin').style.display = 'flex';
@@ -145,7 +117,6 @@ function sair() {
 
 async function buscarPedido() {
   const pedido = $('pedido').value.trim();
-
   if (!pedido) {
     setStatus('statusSistema', 'Informe ou escaneie o número do pedido.', 'error');
     $('pedido').focus();
@@ -154,7 +125,6 @@ async function buscarPedido() {
 
   sessao = sessao || sessionStorage.getItem('sessaoConferencia');
   nomeConferente = nomeConferente || sessionStorage.getItem('nomeConferente');
-
   if (!sessao) {
     setStatus('statusSistema', 'Sua sessão não está disponível. Faça o login novamente.', 'error');
     sair();
@@ -164,23 +134,19 @@ async function buscarPedido() {
   const botao = $('btnBuscarPedido');
   botao.disabled = true;
   botao.textContent = 'Buscando...';
-  setStatus('statusSistema', '');
 
   try {
-    const resultado = await chamarAPI('pedido', { sessao, pedido });
-
-    if (!resultado.sucesso) {
-      if ((resultado.mensagem || '').toLowerCase().includes('sessão')) {
-        sair();
-      }
-      throw new Error(resultado.mensagem || 'Não foi possível consultar o pedido.');
+    const resultado = await chamarAPI('consultarPedido', { sessao, pedido });
+    if (!resultado.ok) {
+      if (resultado.sessaoExpirada) sair();
+      throw new Error(resultado.erro || 'Não foi possível consultar o pedido.');
     }
 
     if (!resultado.encontrado) {
       $('secaoResultado').style.display = 'none';
       $('secaoErro').style.display = 'none';
       $('btnRegistrarSemErro').style.display = 'none';
-      setStatus('statusSistema', resultado.mensagem || 'Pedido não encontrado.', 'error');
+      setStatus('statusSistema', resultado.erro || 'Pedido não encontrado.', 'error');
       return;
     }
 
@@ -199,7 +165,6 @@ function mostrarResultadoPedido(resultado) {
   $('resultadoData').textContent = formatarData(resultado.data);
   $('resultadoTurno').textContent = resultado.turno || '-';
   $('resultadoSeparador').textContent = resultado.separador || '-';
-
   $('secaoResultado').style.display = 'block';
   $('secaoErro').style.display = 'none';
   $('btnRegistrarSemErro').style.display = 'none';
@@ -231,7 +196,6 @@ function adicionarItem() {
     $('sku').focus();
     return;
   }
-
   if (qtdSolicitada === '' || qtdSeparada === '') {
     setStatus('statusSistema', 'Informe as quantidades solicitada e separada.', 'error');
     return;
@@ -239,19 +203,16 @@ function adicionarItem() {
 
   itens.push({ sku, qtdSolicitada, qtdSeparada });
   renderizarItens();
-
   $('sku').value = '';
   $('qtdSolicitada').value = '';
   $('qtdSeparada').value = '';
   $('sku').focus();
-
   setStatus('statusSistema', 'Item adicionado.', 'success');
 }
 
 function renderizarItens() {
   const lista = $('listaItens');
   lista.innerHTML = '';
-
   itens.forEach((item, index) => {
     const div = document.createElement('div');
     div.className = 'item-row';
@@ -269,7 +230,7 @@ function removerItem(index) {
 }
 
 async function registrarSemErro() {
-  await enviarConferencia({ erro: false, itens: [] });
+  await enviarConferencia({ acao: 'registrarSemErro', sessao, pedido: pedidoAtual });
 }
 
 async function registrarComErro() {
@@ -278,14 +239,15 @@ async function registrarComErro() {
     $('sku').focus();
     return;
   }
-
   if (!$('tipoErro').value || !$('gravidade').value || !$('acaoTomada').value) {
     setStatus('statusSistema', 'Preencha tipo de erro, gravidade e ação tomada.', 'error');
     return;
   }
 
   await enviarConferencia({
-    erro: true,
+    acao: 'registrarComErro',
+    sessao,
+    pedido: pedidoAtual,
     itens,
     tipoErro: $('tipoErro').value,
     gravidade: $('gravidade').value,
@@ -300,31 +262,23 @@ async function enviarConferencia(dados) {
     return;
   }
 
-  sessao = sessao || sessionStorage.getItem('sessaoConferencia');
-
-  const botao = dados.erro ? $('btnRegistrarComErro') : $('btnRegistrarSemErro');
+  const botao = dados.acao === 'registrarComErro' ? $('btnRegistrarComErro') : $('btnRegistrarSemErro');
   botao.disabled = true;
   botao.textContent = 'Registrando...';
 
   try {
-    const resultado = await chamarAPI('registrarConferencia', {
-      sessao,
-      pedido: pedidoAtual,
-      ...dados
-    });
-
-    if (!resultado.sucesso) {
-      if ((resultado.mensagem || '').toLowerCase().includes('sessão')) sair();
-      throw new Error(resultado.mensagem || 'Não foi possível registrar a conferência.');
+    const resultado = await chamarAPI(dados.acao, dados);
+    if (!resultado.ok) {
+      if (resultado.sessaoExpirada) sair();
+      throw new Error(resultado.erro || 'Não foi possível registrar a conferência.');
     }
-
     setStatus('statusSistema', resultado.mensagem || 'Conferência registrada com sucesso.', 'success');
     limparCamposConferencia();
   } catch (erro) {
     setStatus('statusSistema', erro.message, 'error');
   } finally {
     botao.disabled = false;
-    botao.textContent = dados.erro ? 'Registrar conferência com erro' : 'Registrar conferência';
+    botao.textContent = dados.acao === 'registrarComErro' ? 'Registrar conferência com erro' : 'Registrar conferência';
   }
 }
 
@@ -361,7 +315,7 @@ function formatarData(valor) {
 }
 
 function escapeHtml(valor) {
-  return String(valor ?? '').replace(/[&<>'"]/g, caractere => ({
+  return String(valor ?? '').replace(/[&<>\'"]/g, caractere => ({
     '&': '&amp;',
     '<': '&lt;',
     '>': '&gt;',
