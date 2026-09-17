@@ -1,4 +1,4 @@
-const API_URL = 'https://script.google.com/macros/s/AKfycbz4OKeJ3nogUAQA1der8lJY7oCySZszZtfrUQmQQ9c5Wz63IQz1_zy3rneSFSRCgkNI_A/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbwlJAOQ8sPFkADagsvCfENQ5CilWGr9TsShXrw1fk5M_LlJA4wGj3yr9l32Pxlhg7c5tQ/exec';
 
 let sessao = null;
 let nomeConferente = null;
@@ -315,7 +315,7 @@ function formatarData(valor) {
 }
 
 function escapeHtml(valor) {
-  return String(valor ?? '').replace(/[&<>\'"]/g, caractere => ({
+  return String(valor ?? '').replace(/[&<>\'\"]/g, caractere => ({
     '&': '&amp;',
     '<': '&lt;',
     '>': '&gt;',
