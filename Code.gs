@@ -158,37 +158,24 @@ function consultarPedido_(body) {
     return { ok: false, erro: 'Informe ou escaneie o pedido.' };
   }
 
-  const aba = getSheet_(ABA_LANCAMENTOS);
-  const ultimaLinha = aba.getLastRow();
+  const resultado = consultarPedidoInterno_(pedido);
 
-  if (ultimaLinha < 2) {
-    return { ok: false, erro: 'Nenhum lançamento encontrado.' };
-  }
-
-  // A Data | B Turno | C Pedido | D Separador
-  const dados = aba.getRange(2, 1, ultimaLinha - 1, 4).getDisplayValues();
-  const pedidoBusca = pedido.toLowerCase();
-
-  for (let i = 0; i < dados.length; i++) {
-    const pedidoPlanilha = normalizarTexto_(dados[i][2]).toLowerCase();
-
-    if (pedidoPlanilha === pedidoBusca) {
-      return {
-        ok: true,
-        encontrado: true,
-        pedido: dados[i][2],
-        data: dados[i][0],
-        turno: dados[i][1],
-        separador: dados[i][3]
-      };
-    }
+  if (!resultado.encontrado) {
+    return {
+      ok: true,
+      encontrado: false,
+      pedido: pedido,
+      erro: 'Pedido não encontrado.'
+    };
   }
 
   return {
     ok: true,
-    encontrado: false,
-    pedido: pedido,
-    erro: 'Pedido não encontrado.'
+    encontrado: true,
+    pedido: resultado.pedido,
+    data: resultado.data,
+    turno: resultado.turno,
+    separador: resultado.separador
   };
 }
 
@@ -215,29 +202,25 @@ function registrarSemErro_(body) {
     return { ok: false, erro: 'Pedido não encontrado.' };
   }
 
-  const agora = new Date();
-  const linha = [
-    agora,                         // A Data
-    resultadoConsulta.turno,      // B Turno
-    resultadoConsulta.pedido,     // C Pedido
-    resultadoConsulta.separador,  // D Separador
-    sessao,                        // E Conferente
-    '',                            // F SKU/Produto
-    '',                            // G Qtd. Solicitada
-    '',                            // H Qtd. Separada
-    '',                            // I Tipo de Erro
-    '',                            // J Gravidade
-    'Não',                         // K Erro Detectado?
-    '',                            // L Ação Tomada
-    '',                            // M Observação
-    'Sim'                          // N A separação está correta?
-  ];
+  const aba = getSheet_(ABA_LANCAMENTOS);
 
-  getSheet_(ABA_LANCAMENTOS).appendRow(linha);
+  // A linha original do pedido é preservada. A conferência completa apenas E:N.
+  aba.getRange(resultadoConsulta.linha, 5, 1, 10).setValues([[
+    sessao, // E Conferente
+    '',     // F SKU/Produto
+    '',     // G Qtd. Solicitada
+    '',     // H Qtd. Separada
+    '',     // I Tipo de Erro
+    '',     // J Gravidade
+    'Não',  // K Erro Detectado?
+    '',     // L Ação Tomada
+    '',     // M Observação
+    'Sim'   // N A separação está correta?
+  ]]);
 
   return {
     ok: true,
-    mensagem: 'Conferência registrada com sucesso.',
+    mensagem: 'Conferência registrada com sucesso na linha original do pedido.',
     pedido: resultadoConsulta.pedido,
     conferente: sessao
   };
@@ -288,7 +271,7 @@ function registrarComErro_(body) {
     return { ok: false, erro: 'Informe a ação tomada.' };
   }
 
-  const linhas = itens.map(item => {
+  const itensNormalizados = itens.map(item => {
     const sku = normalizarTexto_(item.sku);
     const qtdSolicitada = normalizarNumero_(item.qtdSolicitada);
     const qtdSeparada = normalizarNumero_(item.qtdSeparada);
@@ -301,35 +284,70 @@ function registrarComErro_(body) {
       throw new Error('Preencha as quantidades solicitada e separada de todos os itens.');
     }
 
-    return [
-      new Date(),                    // A Data
-      resultadoConsulta.turno,       // B Turno
-      resultadoConsulta.pedido,      // C Pedido
-      resultadoConsulta.separador,   // D Separador
-      sessao,                        // E Conferente
-      sku,                           // F SKU/Produto
-      qtdSolicitada,                 // G Qtd. Solicitada
-      qtdSeparada,                   // H Qtd. Separada
-      tipoErro,                      // I Tipo de Erro
-      gravidade,                     // J Gravidade
-      'Sim',                         // K Erro Detectado?
-      acaoTomada,                    // L Ação Tomada
-      observacao,                    // M Observação
-      'Não'                          // N A separação está correta?
-    ];
+    return {
+      sku,
+      qtdSolicitada,
+      qtdSeparada
+    };
   });
 
-  const aba = getSheet_(ABA_LANCAMENTOS);
-  const primeiraLinha = aba.getLastRow() + 1;
-  aba.getRange(primeiraLinha, 1, linhas.length, 14).setValues(linhas);
+  const primeiraLinha = resultadoConsulta.linha;
+
+  // O primeiro SKU ocupa a linha original do pedido.
+  const primeiroItem = itensNormalizados[0];
+
+  abaAtualizarErro_(resultadoConsulta, sessao, primeiroItem, tipoErro, gravidade, acaoTomada, observacao);
+
+  // Se houver mais SKUs com erro, cada SKU adicional ganha uma linha própria.
+  // A, B, C e D repetem os dados do lançamento original. E recebe o conferente.
+  if (itensNormalizados.length > 1) {
+    const linhasAdicionais = itensNormalizados.slice(1).map(item => [
+      resultadoConsulta.dataValor,  // A Data original, sem horário de conferência
+      resultadoConsulta.turno,      // B Turno original
+      resultadoConsulta.pedido,     // C Pedido
+      resultadoConsulta.separador,  // D Separador
+      sessao,                       // E Conferente
+      item.sku,                     // F SKU/Produto
+      item.qtdSolicitada,           // G Qtd. Solicitada
+      item.qtdSeparada,             // H Qtd. Separada
+      tipoErro,                     // I Tipo de Erro
+      gravidade,                    // J Gravidade
+      'Sim',                        // K Erro Detectado?
+      acaoTomada,                   // L Ação Tomada
+      observacao,                   // M Observação
+      'Não'                         // N A separação está correta?
+    ]);
+
+    const linhaInicial = abaAtualizarErro_.getLastRow ? abaAtualizarErro_.getLastRow() : null;
+    getSheet_(ABA_LANCAMENTOS)
+      .getRange(getSheet_(ABA_LANCAMENTOS).getLastRow() + 1, 1, linhasAdicionais.length, 14)
+      .setValues(linhasAdicionais);
+  }
 
   return {
     ok: true,
-    mensagem: 'Conferência com erro registrada com sucesso.',
-    itensRegistrados: linhas.length,
+    mensagem: 'Conferência com erro registrada com sucesso na linha original do pedido.',
+    itensRegistrados: itensNormalizados.length,
     pedido: resultadoConsulta.pedido,
     conferente: sessao
   };
+}
+
+function abaAtualizarErro_(resultadoConsulta, sessao, item, tipoErro, gravidade, acaoTomada, observacao) {
+  const aba = getSheet_(ABA_LANCAMENTOS);
+
+  aba.getRange(resultadoConsulta.linha, 5, 1, 10).setValues([[
+    sessao,              // E Conferente
+    item.sku,            // F SKU/Produto
+    item.qtdSolicitada,  // G Qtd. Solicitada
+    item.qtdSeparada,    // H Qtd. Separada
+    tipoErro,            // I Tipo de Erro
+    gravidade,           // J Gravidade
+    'Sim',               // K Erro Detectado?
+    acaoTomada,          // L Ação Tomada
+    observacao,          // M Observação
+    'Não'                // N A separação está correta?
+  ]]);
 }
 
 function consultarPedidoInterno_(pedido) {
@@ -345,11 +363,16 @@ function consultarPedidoInterno_(pedido) {
 
   for (let i = 0; i < dados.length; i++) {
     if (normalizarTexto_(dados[i][2]).toLowerCase() === pedidoBusca) {
+      const linha = i + 2;
+      const dataValor = aba.getRange(linha, 1).getValue();
+
       return {
         encontrado: true,
-        pedido: dados[i][2],
+        linha: linha,
         data: dados[i][0],
+        dataValor: dataValor,
         turno: dados[i][1],
+        pedido: dados[i][2],
         separador: dados[i][3]
       };
     }
