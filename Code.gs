@@ -3,12 +3,13 @@ const ABA_LANCAMENTOS = 'Lançamentos';
 const ABA_CADASTRO = 'Cadastro';
 const CACHE_PREFIX = 'CONFERENCIA_V2_';
 const SESSION_SECONDS = 6 * 60 * 60;
+const VERSAO_API = '2.0.1';
 
 function doGet() {
   return jsonResponse({
     ok: true,
     sistema: 'API Sistema Conferência V2',
-    versao: '2.0.0'
+    versao: VERSAO_API
   });
 }
 
@@ -20,30 +21,20 @@ function doPost(e) {
     switch (acao) {
       case 'listarConferentes':
         return jsonResponse(listarConferentes_());
-
       case 'login':
         return jsonResponse(login_(body));
-
       case 'consultarPedido':
         return jsonResponse(consultarPedido_(body));
-
       case 'registrarSemErro':
         return jsonResponse(registrarSemErro_(body));
-
       case 'registrarComErro':
         return jsonResponse(registrarComErro_(body));
-
       case 'validarSessao':
         return jsonResponse(validarSessao_(body));
-
       case 'logout':
         return jsonResponse(logout_(body));
-
       default:
-        return jsonResponse({
-          ok: false,
-          erro: 'Ação não reconhecida.'
-        });
+        return jsonResponse({ ok: false, erro: 'Ação não reconhecida.' });
     }
   } catch (erro) {
     console.error(erro);
@@ -58,11 +49,8 @@ function listarConferentes_() {
   const aba = getSheet_(ABA_CADASTRO);
   const ultimaLinha = aba.getLastRow();
 
-  if (ultimaLinha < 2) {
-    return { ok: true, conferentes: [] };
-  }
+  if (ultimaLinha < 2) return { ok: true, conferentes: [] };
 
-  // Cadastro: A Separador | B Meta de Erro | C Observação | D Conferente | E Senha
   const valores = aba.getRange(2, 4, ultimaLinha - 1, 1).getDisplayValues();
   const conferentes = valores
     .map(linha => String(linha[0]).trim())
@@ -72,31 +60,21 @@ function listarConferentes_() {
     a.localeCompare(b, 'pt-BR', { sensitivity: 'base' })
   );
 
-  return {
-    ok: true,
-    conferentes: unicos
-  };
+  return { ok: true, conferentes: unicos };
 }
 
 function login_(body) {
-  const conferente = String(body.conferente || '').trim();
-
-  if (!conferente) {
-    return { ok: false, erro: 'Selecione um conferente.' };
-  }
+  const conferente = normalizarTexto_(body.conferente);
+  if (!conferente) return { ok: false, erro: 'Selecione um conferente.' };
 
   const conferentes = listarConferentes_().conferentes;
-  const encontrado = conferentes.some(nome =>
-    nome.toLowerCase() === conferente.toLowerCase()
-  );
-
-  if (!encontrado) {
-    return { ok: false, erro: 'Conferente não encontrado no cadastro.' };
-  }
-
   const nomeOficial = conferentes.find(nome =>
     nome.toLowerCase() === conferente.toLowerCase()
   );
+
+  if (!nomeOficial) {
+    return { ok: false, erro: 'Conferente não encontrado no cadastro.' };
+  }
 
   const token = Utilities.getUuid();
   CacheService.getScriptCache().put(
@@ -115,7 +93,6 @@ function login_(body) {
 
 function validarSessao_(body) {
   const sessao = obterSessao_(body);
-
   if (!sessao) {
     return {
       ok: false,
@@ -123,50 +100,27 @@ function validarSessao_(body) {
       erro: 'Sessão expirada. Faça login novamente.'
     };
   }
-
-  return {
-    ok: true,
-    sessaoValida: true,
-    conferente: sessao
-  };
+  return { ok: true, sessaoValida: true, conferente: sessao };
 }
 
 function logout_(body) {
-  const token = String(body.sessao || '').trim();
-
-  if (token) {
-    CacheService.getScriptCache().remove(CACHE_PREFIX + token);
-  }
-
+  const token = normalizarTexto_(body.sessao);
+  if (token) CacheService.getScriptCache().remove(CACHE_PREFIX + token);
   return { ok: true };
 }
 
 function consultarPedido_(body) {
   const conferente = obterSessao_(body);
-
   if (!conferente) {
-    return {
-      ok: false,
-      sessaoExpirada: true,
-      erro: 'Sessão expirada. Faça login novamente.'
-    };
+    return { ok: false, sessaoExpirada: true, erro: 'Sessão expirada. Faça login novamente.' };
   }
 
   const pedido = normalizarTexto_(body.pedido);
-
-  if (!pedido) {
-    return { ok: false, erro: 'Informe ou escaneie o pedido.' };
-  }
+  if (!pedido) return { ok: false, erro: 'Informe ou escaneie o pedido.' };
 
   const resultado = consultarPedidoInterno_(pedido);
-
   if (!resultado.encontrado) {
-    return {
-      ok: true,
-      encontrado: false,
-      pedido: pedido,
-      erro: 'Pedido não encontrado.'
-    };
+    return { ok: true, encontrado: false, pedido, erro: 'Pedido não encontrado.' };
   }
 
   return {
@@ -181,46 +135,37 @@ function consultarPedido_(body) {
 
 function registrarSemErro_(body) {
   const sessao = obterSessao_(body);
-
   if (!sessao) {
-    return {
-      ok: false,
-      sessaoExpirada: true,
-      erro: 'Sessão expirada. Faça login novamente.'
-    };
+    return { ok: false, sessaoExpirada: true, erro: 'Sessão expirada. Faça login novamente.' };
   }
 
   const pedido = normalizarTexto_(body.pedido);
-
-  if (!pedido) {
-    return { ok: false, erro: 'Pedido não informado.' };
-  }
+  if (!pedido) return { ok: false, erro: 'Pedido não informado.' };
 
   const resultadoConsulta = consultarPedidoInterno_(pedido);
-
-  if (!resultadoConsulta.encontrado) {
-    return { ok: false, erro: 'Pedido não encontrado.' };
-  }
+  if (!resultadoConsulta.encontrado) return { ok: false, erro: 'Pedido não encontrado.' };
 
   const aba = getSheet_(ABA_LANCAMENTOS);
 
-  // A linha original do pedido é preservada. A conferência completa apenas E:N.
+  // IMPORTANTE: não altera A:D e não cria nova linha.
+  // A data e o turno pertencem ao lançamento original.
+  // A coluna A continua somente com a data já existente na planilha.
   aba.getRange(resultadoConsulta.linha, 5, 1, 10).setValues([[
-    sessao, // E Conferente
-    '',     // F SKU/Produto
-    '',     // G Qtd. Solicitada
-    '',     // H Qtd. Separada
-    '',     // I Tipo de Erro
-    '',     // J Gravidade
-    'Não',  // K Erro Detectado?
-    '',     // L Ação Tomada
-    '',     // M Observação
-    'Sim'   // N A separação está correta?
+    sessao,
+    '',
+    '',
+    '',
+    '',
+    '',
+    'Não',
+    '',
+    '',
+    'Sim'
   ]]);
 
   return {
     ok: true,
-    mensagem: 'Conferência registrada com sucesso na linha original do pedido.',
+    mensagem: 'Conferência registrada na linha original do pedido.',
     pedido: resultadoConsulta.pedido,
     conferente: sessao
   };
@@ -228,135 +173,94 @@ function registrarSemErro_(body) {
 
 function registrarComErro_(body) {
   const sessao = obterSessao_(body);
-
   if (!sessao) {
-    return {
-      ok: false,
-      sessaoExpirada: true,
-      erro: 'Sessão expirada. Faça login novamente.'
-    };
+    return { ok: false, sessaoExpirada: true, erro: 'Sessão expirada. Faça login novamente.' };
   }
 
   const pedido = normalizarTexto_(body.pedido);
   const itens = Array.isArray(body.itens) ? body.itens : [];
 
-  if (!pedido) {
-    return { ok: false, erro: 'Pedido não informado.' };
-  }
-
-  if (itens.length === 0) {
-    return { ok: false, erro: 'Adicione pelo menos um SKU com erro.' };
-  }
+  if (!pedido) return { ok: false, erro: 'Pedido não informado.' };
+  if (itens.length === 0) return { ok: false, erro: 'Adicione pelo menos um SKU com erro.' };
 
   const resultadoConsulta = consultarPedidoInterno_(pedido);
-
-  if (!resultadoConsulta.encontrado) {
-    return { ok: false, erro: 'Pedido não encontrado.' };
-  }
+  if (!resultadoConsulta.encontrado) return { ok: false, erro: 'Pedido não encontrado.' };
 
   const tipoErro = normalizarTexto_(body.tipoErro);
   const gravidade = normalizarTexto_(body.gravidade);
   const acaoTomada = normalizarTexto_(body.acaoTomada);
   const observacao = normalizarTexto_(body.observacao);
 
-  if (!tipoErro) {
-    return { ok: false, erro: 'Informe o tipo de erro.' };
-  }
-
-  if (!gravidade) {
-    return { ok: false, erro: 'Informe a gravidade.' };
-  }
-
-  if (!acaoTomada) {
-    return { ok: false, erro: 'Informe a ação tomada.' };
-  }
+  if (!tipoErro) return { ok: false, erro: 'Informe o tipo de erro.' };
+  if (!gravidade) return { ok: false, erro: 'Informe a gravidade.' };
+  if (!acaoTomada) return { ok: false, erro: 'Informe a ação tomada.' };
 
   const itensNormalizados = itens.map(item => {
     const sku = normalizarTexto_(item.sku);
     const qtdSolicitada = normalizarNumero_(item.qtdSolicitada);
     const qtdSeparada = normalizarNumero_(item.qtdSeparada);
 
-    if (!sku) {
-      throw new Error('Existe um item sem SKU/Produto informado.');
-    }
-
+    if (!sku) throw new Error('Existe um item sem SKU/Produto informado.');
     if (qtdSolicitada === '' || qtdSeparada === '') {
       throw new Error('Preencha as quantidades solicitada e separada de todos os itens.');
     }
 
-    return {
-      sku,
-      qtdSolicitada,
-      qtdSeparada
-    };
+    return { sku, qtdSolicitada, qtdSeparada };
   });
 
-  const primeiraLinha = resultadoConsulta.linha;
+  const aba = getSheet_(ABA_LANCAMENTOS);
+  const primeiro = itensNormalizados[0];
 
-  // O primeiro SKU ocupa a linha original do pedido.
-  const primeiroItem = itensNormalizados[0];
+  // Primeiro SKU ocupa a linha original, preservando A:D.
+  aba.getRange(resultadoConsulta.linha, 5, 1, 10).setValues([[
+    sessao,
+    primeiro.sku,
+    primeiro.qtdSolicitada,
+    primeiro.qtdSeparada,
+    tipoErro,
+    gravidade,
+    'Sim',
+    acaoTomada,
+    observacao,
+    'Não'
+  ]]);
 
-  abaAtualizarErro_(resultadoConsulta, sessao, primeiroItem, tipoErro, gravidade, acaoTomada, observacao);
-
-  // Se houver mais SKUs com erro, cada SKU adicional ganha uma linha própria.
-  // A, B, C e D repetem os dados do lançamento original. E recebe o conferente.
+  // SKUs adicionais precisam de linhas próprias.
   if (itensNormalizados.length > 1) {
     const linhasAdicionais = itensNormalizados.slice(1).map(item => [
-      resultadoConsulta.dataValor,  // A Data original, sem horário de conferência
-      resultadoConsulta.turno,      // B Turno original
-      resultadoConsulta.pedido,     // C Pedido
-      resultadoConsulta.separador,  // D Separador
-      sessao,                       // E Conferente
-      item.sku,                     // F SKU/Produto
-      item.qtdSolicitada,           // G Qtd. Solicitada
-      item.qtdSeparada,             // H Qtd. Separada
-      tipoErro,                     // I Tipo de Erro
-      gravidade,                    // J Gravidade
-      'Sim',                        // K Erro Detectado?
-      acaoTomada,                   // L Ação Tomada
-      observacao,                   // M Observação
-      'Não'                         // N A separação está correta?
+      resultadoConsulta.dataValor,
+      resultadoConsulta.turno,
+      resultadoConsulta.pedido,
+      resultadoConsulta.separador,
+      sessao,
+      item.sku,
+      item.qtdSolicitada,
+      item.qtdSeparada,
+      tipoErro,
+      gravidade,
+      'Sim',
+      acaoTomada,
+      observacao,
+      'Não'
     ]);
 
-    const linhaInicial = abaAtualizarErro_.getLastRow ? abaAtualizarErro_.getLastRow() : null;
-    getSheet_(ABA_LANCAMENTOS)
-      .getRange(getSheet_(ABA_LANCAMENTOS).getLastRow() + 1, 1, linhasAdicionais.length, 14)
-      .setValues(linhasAdicionais);
+    const linhaInicial = aba.getLastRow() + 1;
+    aba.getRange(linhaInicial, 1, linhasAdicionais.length, 14).setValues(linhasAdicionais);
   }
 
   return {
     ok: true,
-    mensagem: 'Conferência com erro registrada com sucesso na linha original do pedido.',
+    mensagem: 'Conferência com erro registrada na linha original do pedido.',
     itensRegistrados: itensNormalizados.length,
     pedido: resultadoConsulta.pedido,
     conferente: sessao
   };
 }
 
-function abaAtualizarErro_(resultadoConsulta, sessao, item, tipoErro, gravidade, acaoTomada, observacao) {
-  const aba = getSheet_(ABA_LANCAMENTOS);
-
-  aba.getRange(resultadoConsulta.linha, 5, 1, 10).setValues([[
-    sessao,              // E Conferente
-    item.sku,            // F SKU/Produto
-    item.qtdSolicitada,  // G Qtd. Solicitada
-    item.qtdSeparada,    // H Qtd. Separada
-    tipoErro,            // I Tipo de Erro
-    gravidade,           // J Gravidade
-    'Sim',               // K Erro Detectado?
-    acaoTomada,          // L Ação Tomada
-    observacao,          // M Observação
-    'Não'                // N A separação está correta?
-  ]]);
-}
-
 function consultarPedidoInterno_(pedido) {
   const aba = getSheet_(ABA_LANCAMENTOS);
   const ultimaLinha = aba.getLastRow();
-
-  if (ultimaLinha < 2) {
-    return { encontrado: false };
-  }
+  if (ultimaLinha < 2) return { encontrado: false };
 
   const dados = aba.getRange(2, 1, ultimaLinha - 1, 4).getDisplayValues();
   const pedidoBusca = normalizarTexto_(pedido).toLowerCase();
@@ -364,13 +268,11 @@ function consultarPedidoInterno_(pedido) {
   for (let i = 0; i < dados.length; i++) {
     if (normalizarTexto_(dados[i][2]).toLowerCase() === pedidoBusca) {
       const linha = i + 2;
-      const dataValor = aba.getRange(linha, 1).getValue();
-
       return {
         encontrado: true,
-        linha: linha,
+        linha,
         data: dados[i][0],
-        dataValor: dataValor,
+        dataValor: aba.getRange(linha, 1).getValue(),
         turno: dados[i][1],
         pedido: dados[i][2],
         separador: dados[i][3]
@@ -382,36 +284,23 @@ function consultarPedidoInterno_(pedido) {
 }
 
 function obterSessao_(body) {
-  const token = String(body.sessao || '').trim();
-
-  if (!token) {
-    return null;
-  }
-
+  const token = normalizarTexto_(body.sessao);
+  if (!token) return null;
   return CacheService.getScriptCache().get(CACHE_PREFIX + token);
 }
 
 function getSheet_(nome) {
   const planilha = SpreadsheetApp.openById(SPREADSHEET_ID);
   const aba = planilha.getSheetByName(nome);
-
-  if (!aba) {
-    throw new Error('Aba não encontrada: ' + nome);
-  }
-
+  if (!aba) throw new Error('Aba não encontrada: ' + nome);
   return aba;
 }
 
 function parseBody_(e) {
-  if (!e || !e.postData || !e.postData.contents) {
-    return {};
-  }
+  if (!e || !e.postData || !e.postData.contents) return {};
 
   const texto = e.postData.contents.trim();
-
-  if (!texto) {
-    return {};
-  }
+  if (!texto) return {};
 
   try {
     return JSON.parse(texto);
@@ -421,17 +310,12 @@ function parseBody_(e) {
 }
 
 function normalizarTexto_(valor) {
-  if (valor === null || valor === undefined) {
-    return '';
-  }
-
+  if (valor === null || valor === undefined) return '';
   return String(valor).trim();
 }
 
 function normalizarNumero_(valor) {
-  if (valor === null || valor === undefined || String(valor).trim() === '') {
-    return '';
-  }
+  if (valor === null || valor === undefined || String(valor).trim() === '') return '';
 
   const texto = String(valor).trim().replace(',', '.');
   const numero = Number(texto);
