@@ -44,69 +44,154 @@
       <section class="card">
         <div class="step-title">
           <span class="step">1</span>
-          <div><h2>Localizar pedido</h2><p>Digite ou escaneie o código do pedido.</p></div>
+          <div>
+            <h2>Localizar pedido</h2>
+            <p>Digite o número ou use um leitor de código de barras.</p>
+          </div>
         </div>
+
         <div class="search-row">
           <div class="field grow">
             <label for="pedido">Número do pedido</label>
-            <input id="pedido" type="text" inputmode="numeric" autocomplete="off" placeholder="Digite ou escaneie o pedido">
+            <input
+              id="pedido"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              placeholder="Digite ou escaneie o pedido"
+            >
           </div>
-          <button id="btnBuscarPedido" class="btn btn-primary search-button" type="button">Buscar pedido</button>
+          <button id="btnBuscarPedido" class="btn btn-primary search-button" type="button">
+            Buscar pedido
+          </button>
         </div>
       </section>
 
       <section id="secaoResultado" class="card" style="display:none">
         <div class="step-title">
           <span class="step">2</span>
-          <div><h2>Pedido localizado</h2><p>Confira os dados e escolha o resultado da conferência.</p></div>
-        </div>
-        <div class="info-grid info-grid-compact">
-          <div><span>Pedido</span><strong id="resultadoPedido">-</strong></div>
-          <div><span>Separador</span><strong id="resultadoSeparador">-</strong></div>
-        </div>
-
-        <div class="question-box">
-          <h2>A separação está correta?</h2>
-          <p>Se tudo estiver certo, registre diretamente. Se houver divergência, informe os itens abaixo.</p>
-          <div class="choice-grid">
-            <button id="btnSemErro" class="choice choice-ok" type="button"><b>✓</b><span>Sim, está correta</span></button>
-            <button id="btnComErro" class="choice choice-error" type="button"><b>!</b><span>Não, encontrei erro</span></button>
+          <div>
+            <h2>Pedido localizado</h2>
+            <p>Confira o separador e o resultado da conferência.</p>
           </div>
         </div>
 
-        <button id="btnRegistrarSemErro" class="btn btn-success btn-register" type="button" style="display:none">Registrar conferência</button>
+        <div class="info-grid info-grid-compact">
+          <div>
+            <span>Pedido</span>
+            <strong id="resultadoPedido">-</strong>
+          </div>
+          <div>
+            <span>Separador</span>
+            <strong id="resultadoSeparador">-</strong>
+          </div>
+        </div>
+
+        <div class="question-box">
+          <h2>A conferência está correta?</h2>
+          <p>
+            Em <strong>Sim</strong>, o sistema grava a conferência imediatamente.
+            Em <strong>Não</strong>, abre os campos para registrar o erro.
+          </p>
+
+          <div class="choice-grid">
+            <button id="btnSemErro" class="choice choice-ok" type="button">
+              <b>✓</b>
+              <span>Sim, está correta</span>
+            </button>
+
+            <button id="btnComErro" class="choice choice-error" type="button">
+              <b>!</b>
+              <span>Não, encontrei erro</span>
+            </button>
+          </div>
+        </div>
       </section>
 
       <section id="secaoErro" class="card error-card" style="display:none">
         <div class="step-title">
           <span class="step step-error">!</span>
-          <div><h2>Registrar erro</h2><p>Adicione cada SKU que apresentou divergência.</p></div>
+          <div>
+            <h2>Registrar erro</h2>
+            <p>Preencha os dados da divergência encontrada.</p>
+          </div>
         </div>
 
         <div class="item-panel">
           <h3>Item com divergência</h3>
-          <div class="item-grid">
-            <div class="field sku-field"><label for="sku">SKU / Produto</label><input id="sku" type="text" autocomplete="off" placeholder="SKU"></div>
-            <div class="field"><label for="qtdSolicitada">Qtd. solicitada</label><input id="qtdSolicitada" type="number" min="0" step="1" placeholder="0"></div>
-            <div class="field"><label for="qtdSeparada">Qtd. separada</label><input id="qtdSeparada" type="number" min="0" step="1" placeholder="0"></div>
-            <button id="btnAdicionarItem" class="btn btn-dark add-button" type="button">+ Adicionar item</button>
+
+          <div class="form-grid">
+            <div class="field full">
+              <label for="sku">SKU / Produto</label>
+              <input id="sku" type="text" autocomplete="off" placeholder="SKU ou descrição do produto">
+            </div>
+
+            <div class="field">
+              <label for="qtdSolicitada">Qtd. solicitada</label>
+              <input id="qtdSolicitada" type="number" min="0" step="1" placeholder="0">
+            </div>
+
+            <div class="field">
+              <label for="qtdSeparada">Qtd. separada</label>
+              <input id="qtdSeparada" type="number" min="0" step="1" placeholder="0">
+            </div>
           </div>
-          <div id="listaItens" class="items-list"></div>
         </div>
 
         <div class="form-grid">
-          <div class="field"><label for="tipoErro">Tipo de erro</label><select id="tipoErro"><option value="">Selecione</option><option value="Falta">Falta</option><option value="Excesso">Excesso</option><option value="Produto incorreto">Produto incorreto</option><option value="Quantidade incorreta">Quantidade incorreta</option><option value="Avaria">Avaria</option><option value="Outro">Outro</option></select></div>
-          <div class="field"><label for="gravidade">Gravidade</label><select id="gravidade"><option value="">Selecione</option><option value="Baixa">Baixa</option><option value="Média">Média</option><option value="Alta">Alta</option></select></div>
-          <div class="field full"><label for="acaoTomada">Ação tomada</label><select id="acaoTomada"><option value="">Selecione</option><option value="Correção realizada">Correção realizada</option><option value="Produto substituído">Produto substituído</option><option value="Quantidade corrigida">Quantidade corrigida</option><option value="Separador comunicado">Separador comunicado</option><option value="Outra ação">Outra ação</option></select></div>
-          <div class="field full"><label for="observacao">Observação</label><textarea id="observacao" placeholder="Informe alguma observação importante..."></textarea></div>
+          <div class="field">
+            <label for="tipoErro">Tipo de erro</label>
+            <select id="tipoErro">
+              <option value="">Selecione</option>
+              <option value="Falta">Falta</option>
+              <option value="Excesso">Excesso</option>
+              <option value="Produto incorreto">Produto incorreto</option>
+              <option value="Quantidade incorreta">Quantidade incorreta</option>
+              <option value="Avaria">Avaria</option>
+              <option value="Outro">Outro</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="gravidade">Gravidade</label>
+            <select id="gravidade">
+              <option value="">Selecione</option>
+              <option value="Baixa">Baixa</option>
+              <option value="Média">Média</option>
+              <option value="Alta">Alta</option>
+            </select>
+          </div>
+
+          <div class="field full">
+            <label for="acaoTomada">Ação tomada</label>
+            <select id="acaoTomada">
+              <option value="">Selecione</option>
+              <option value="Correção realizada">Correção realizada</option>
+              <option value="Produto substituído">Produto substituído</option>
+              <option value="Quantidade corrigida">Quantidade corrigida</option>
+              <option value="Separador comunicado">Separador comunicado</option>
+              <option value="Outra ação">Outra ação</option>
+            </select>
+          </div>
+
+          <div class="field full">
+            <label for="observacao">Observação</label>
+            <textarea
+              id="observacao"
+              placeholder="Informe alguma observação importante..."
+            ></textarea>
+          </div>
         </div>
-        <button id="btnRegistrarComErro" class="btn btn-primary btn-register" type="button">Registrar conferência com erro</button>
+
+        <button id="btnRegistrarComErro" class="btn btn-primary btn-register" type="button">
+          Registrar conferência com erro
+        </button>
       </section>
 
       <div id="statusSistema" class="status" aria-live="polite"></div>
     </main>
   </div>
 
-  <script src="script.js?v=2.0.2"></script>
+  <script src="script.js?v=2.1.0"></script>
 </body>
 </html>
