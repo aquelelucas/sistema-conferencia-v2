@@ -162,8 +162,6 @@ async function buscarPedido() {
 
 function mostrarResultadoPedido(resultado) {
   $('resultadoPedido').textContent = resultado.pedido || '-';
-  $('resultadoData').textContent = formatarData(resultado.data);
-  $('resultadoTurno').textContent = resultado.turno || '-';
   $('resultadoSeparador').textContent = resultado.separador || '-';
   $('secaoResultado').style.display = 'block';
   $('secaoErro').style.display = 'none';
@@ -305,13 +303,6 @@ function setStatus(id, mensagem, tipo = '') {
   if (!elemento) return;
   elemento.textContent = mensagem || '';
   elemento.className = 'status' + (tipo ? ' ' + tipo : '');
-}
-
-function formatarData(valor) {
-  if (!valor) return '-';
-  const data = new Date(valor);
-  if (Number.isNaN(data.getTime())) return String(valor);
-  return data.toLocaleDateString('pt-BR');
 }
 
 function escapeHtml(valor) {
