@@ -1,16 +1,13 @@
 /**
- * LINK DE CONFERÊNCIA
- * API responsável pela conferência dos pedidos.
+ * LINK DE CONFERÊNCIA V2
  *
- * REGRA PRINCIPAL:
+ * Regras:
  * - Pedido é localizado exclusivamente pela coluna C da aba Lançamentos.
- * - O separador é lido da coluna D da mesma linha encontrada.
- * - A:D pertencem ao lançamento original e NÃO são alteradas pela conferência.
- * - A conferência preenche E:N.
- * - Esta API NÃO cria data/hora de conferência.
- *
- * O Link de Separação é outro projeto e não deve ter suas regras
- * de data/hora copiadas para este sistema.
+ * - O separador é lido da coluna D da mesma linha.
+ * - A:D não são alteradas pela conferência.
+ * - A conferência grava E:N na mesma linha do pedido.
+ * - Não cria data nem hora.
+ * - Não cria nova linha para registrar a conferência.
  */
 
 const SPREADSHEET_ID = '16l4PoccxeI_masCzuQh1vHfJV5z3A-yvz80A2yaubRk';
@@ -18,10 +15,8 @@ const ABA_LANCAMENTOS = 'Lançamentos';
 const ABA_CADASTRO = 'Cadastro';
 
 const CACHE_PREFIX = 'CONFERENCIA_V2_';
-const CACHE_CONFERENTES = CACHE_PREFIX + 'CONFERENTES';
 const SESSION_SECONDS = 6 * 60 * 60;
-const CONFERENTES_CACHE_SECONDS = 300;
-const VERSAO_API = '2.0.2';
+const VERSAO_API = '2.1.0';
 
 function doGet() {
   return jsonResponse({
@@ -34,7 +29,7 @@ function doGet() {
 function doPost(e) {
   try {
     const body = parseBody_(e);
-    const acao = String(body.acao || '').trim();
+    const acao = normalizarTexto_(body.acao);
 
     switch (acao) {
       case 'listarConferentes':
@@ -52,87 +47,124 @@ function doPost(e) {
       case 'logout':
         return jsonResponse(logout_(body));
       default:
-        return jsonResponse({ ok: false, erro: 'Ação não reconhecida.' });
+        return jsonResponse({
+          ok: false,
+          erro: 'Ação não reconhecida.'
+        });
     }
   } catch (erro) {
     console.error(erro);
+
     return jsonResponse({
       ok: false,
-      erro: erro && erro.message ? erro.message : 'Erro interno da API.'
+      erro: erro && erro.message
+        ? erro.message
+        : 'Erro interno da API.'
     });
   }
 }
 
 /**
- * Lista somente os nomes da coluna D da aba Cadastro.
- * A coluna E (Senha) e qualquer coluna Ativo são ignoradas.
- * O resultado fica em cache por 5 minutos para reduzir leituras.
+ * Detecta a coluna dos conferentes pelo cabeçalho.
+ *
+ * Prioridade:
+ * 1. cabeçalho contendo "Conferente";
+ * 2. coluna D, que é o layout oficial do V2;
+ * 3. coluna A como compatibilidade caso D esteja vazia.
  */
-function listarConferentes_() {
-  const cache = CacheService.getScriptCache();
-  const cacheado = cache.get(CACHE_CONFERENTES);
+function descobrirColunaConferentes_(aba) {
+  const ultimaColuna = Math.max(aba.getLastColumn(), 4);
+  const cabecalhos = aba
+    .getRange(1, 1, 1, ultimaColuna)
+    .getDisplayValues()[0];
 
-  if (cacheado) {
-    try {
-      return JSON.parse(cacheado);
-    } catch (erro) {
-      // Cache inválido: segue para uma leitura nova.
+  for (let i = 0; i < cabecalhos.length; i++) {
+    const cabecalho = normalizarCabecalho_(cabecalhos[i]);
+
+    if (cabecalho.includes('conferente')) {
+      return i + 1;
     }
   }
 
+  if (aba.getLastRow() >= 2) {
+    const valoresD = aba
+      .getRange(2, 4, aba.getLastRow() - 1, 1)
+      .getDisplayValues()
+      .flat()
+      .map(normalizarTexto_)
+      .filter(Boolean);
+
+    if (valoresD.length > 0) {
+      return 4;
+    }
+  }
+
+  return 1;
+}
+
+function listarConferentes_() {
   const aba = getSheet_(ABA_CADASTRO);
+  const coluna = descobrirColunaConferentes_(aba);
   const ultimaLinha = aba.getLastRow();
 
   if (ultimaLinha < 2) {
-    const vazio = { ok: true, conferentes: [] };
-    cache.put(CACHE_CONFERENTES, JSON.stringify(vazio), CONFERENTES_CACHE_SECONDS);
-    return vazio;
+    return {
+      ok: true,
+      conferentes: [],
+      colunaUsada: coluna
+    };
   }
 
-  const valores = aba.getRange(2, 4, ultimaLinha - 1, 1).getDisplayValues();
-
-  const conferentes = valores
-    .map(linha => String(linha[0]).trim())
+  const conferentes = aba
+    .getRange(2, coluna, ultimaLinha - 1, 1)
+    .getDisplayValues()
+    .flat()
+    .map(normalizarTexto_)
     .filter(Boolean);
 
   const unicos = [...new Set(conferentes)].sort((a, b) =>
     a.localeCompare(b, 'pt-BR', { sensitivity: 'base' })
   );
 
-  const resultado = { ok: true, conferentes: unicos };
-
-  cache.put(
-    CACHE_CONFERENTES,
-    JSON.stringify(resultado),
-    CONFERENTES_CACHE_SECONDS
-  );
-
-  return resultado;
+  return {
+    ok: true,
+    conferentes: unicos,
+    colunaUsada: coluna
+  };
 }
 
 function login_(body) {
-  const conferente = normalizarTexto_(body.conferente);
+  const conferenteInformado = normalizarTexto_(body.conferente);
 
-  if (!conferente) {
-    return { ok: false, erro: 'Selecione um conferente.' };
+  if (!conferenteInformado) {
+    return {
+      ok: false,
+      erro: 'Selecione o conferente.'
+    };
   }
 
   const conferentes = listarConferentes_().conferentes;
+
   const nomeOficial = conferentes.find(nome =>
-    nome.toLowerCase() === conferente.toLowerCase()
+    nome.toLowerCase() === conferenteInformado.toLowerCase()
   );
 
   if (!nomeOficial) {
-    return { ok: false, erro: 'Conferente não encontrado no cadastro.' };
+    return {
+      ok: false,
+      erro: 'Conferente não encontrado no Cadastro.'
+    };
   }
 
   const token = Utilities.getUuid();
 
-  CacheService.getScriptCache().put(
-    CACHE_PREFIX + token,
-    nomeOficial,
-    SESSION_SECONDS
-  );
+  CacheService
+    .getScriptCache()
+    .put(
+      CACHE_PREFIX + token,
+      nomeOficial,
+      SESSION_SECONDS
+    );
 
   return {
     ok: true,
@@ -153,23 +185,25 @@ function validarSessao_(body) {
     };
   }
 
-  return { ok: true, sessaoValida: true, conferente: sessao };
+  return {
+    ok: true,
+    sessaoValida: true,
+    conferente: sessao
+  };
 }
 
 function logout_(body) {
   const token = normalizarTexto_(body.sessao);
-  if (token) CacheService.getScriptCache().remove(CACHE_PREFIX + token);
+
+  if (token) {
+    CacheService
+      .getScriptCache()
+      .remove(CACHE_PREFIX + token);
+  }
+
   return { ok: true };
 }
 
-/**
- * LOCALIZAÇÃO DO PEDIDO
- *
- * A busca usa SOMENTE a coluna C (Pedido).
- * Ao encontrar, o separador vem da coluna D da MESMA linha.
- *
- * Data e turno não participam da identificação do pedido.
- */
 function consultarPedido_(body) {
   const conferente = obterSessao_(body);
 
@@ -184,17 +218,42 @@ function consultarPedido_(body) {
   const pedido = normalizarTexto_(body.pedido);
 
   if (!pedido) {
-    return { ok: false, erro: 'Informe ou escaneie o pedido.' };
+    return {
+      ok: false,
+      erro: 'Informe ou escaneie o pedido.'
+    };
   }
 
-  const resultado = consultarPedidoInterno_(pedido);
+  const resultado = localizarPedido_(pedido);
 
   if (!resultado.encontrado) {
     return {
       ok: true,
       encontrado: false,
-      pedido,
+      pedido: pedido,
       erro: 'Pedido não encontrado.'
+    };
+  }
+
+  if (resultado.jaConferido) {
+    return {
+      ok: true,
+      encontrado: false,
+      jaConferido: true,
+      pedido: resultado.pedido,
+      erro: 'O pedido ' + resultado.pedido + ' já foi conferido.'
+    };
+  }
+
+  if (!resultado.separador) {
+    return {
+      ok: true,
+      encontrado: false,
+      pedido: resultado.pedido,
+      erro:
+        'O pedido ' +
+        resultado.pedido +
+        ' foi encontrado, mas não possui separador informado na coluna D.'
     };
   }
 
@@ -207,14 +266,58 @@ function consultarPedido_(body) {
 }
 
 /**
- * REGISTRO SEM ERRO
- *
- * Atualiza a MESMA linha onde o pedido foi encontrado.
- * A:D ficam exatamente como estavam.
- * E:N recebem os dados da conferência.
- *
- * Não cria data/hora e não cria nova linha.
+ * Localiza a primeira ocorrência do pedido ainda não conferida.
+ * Se só existirem ocorrências já conferidas, devolve uma delas para o aviso.
  */
+function localizarPedido_(pedido) {
+  const aba = getSheet_(ABA_LANCAMENTOS);
+  const ultimaLinha = aba.getLastRow();
+
+  if (ultimaLinha < 2) {
+    return { encontrado: false };
+  }
+
+  const dados = aba
+    .getRange(2, 1, ultimaLinha - 1, 14)
+    .getDisplayValues();
+
+  const busca = normalizarPedido_(pedido);
+  let primeiraConferida = null;
+
+  for (let i = 0; i < dados.length; i++) {
+    const linhaDados = dados[i];
+    const pedidoPlanilha = normalizarTexto_(linhaDados[2]);
+
+    if (!pedidoPlanilha) continue;
+
+    if (normalizarPedido_(pedidoPlanilha) !== busca) {
+      continue;
+    }
+
+    const registro = {
+      encontrado: true,
+      linha: i + 2,
+      pedido: pedidoPlanilha,
+      separador: normalizarTexto_(linhaDados[3]),
+      conferenteAtual: normalizarTexto_(linhaDados[4]),
+      resultadoAtual: normalizarTexto_(linhaDados[13]),
+      jaConferido:
+        !!normalizarTexto_(linhaDados[4]) ||
+        !!normalizarTexto_(linhaDados[13])
+    };
+
+    if (!registro.jaConferido) {
+      return registro;
+    }
+
+    if (!primeiraConferida) {
+      primeiraConferida = registro;
+    }
+  }
+
+  return primeiraConferida || { encontrado: false };
+}
+
 function registrarSemErro_(body) {
   const sessao = obterSessao_(body);
 
@@ -229,49 +332,64 @@ function registrarSemErro_(body) {
   const pedido = normalizarTexto_(body.pedido);
 
   if (!pedido) {
-    return { ok: false, erro: 'Pedido não informado.' };
+    return {
+      ok: false,
+      erro: 'Pedido não informado.'
+    };
   }
 
-  const resultadoConsulta = consultarPedidoInterno_(pedido);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
 
-  if (!resultadoConsulta.encontrado) {
-    return { ok: false, erro: 'Pedido não encontrado.' };
+  try {
+    const registro = localizarPedido_(pedido);
+
+    if (!registro || !registro.encontrado) {
+      return {
+        ok: false,
+        erro: 'Pedido não encontrado.'
+      };
+    }
+
+    if (registro.jaConferido) {
+      return {
+        ok: false,
+        jaConferido: true,
+        erro: 'O pedido ' + registro.pedido + ' já foi conferido.'
+      };
+    }
+
+    const aba = registro.aba || getSheet_(ABA_LANCAMENTOS);
+
+    // A:D permanecem intactas.
+    // E:N recebem somente os dados da conferência.
+    aba.getRange(registro.linha, 5, 1, 10).setValues([[
+      sessao, // E Conferente
+      '',     // F SKU/Produto
+      '',     // G Qtd. Solicitada
+      '',     // H Qtd. Separada
+      '',     // I Tipo de Erro
+      '',     // J Gravidade
+      'NÃO',  // K Erro Detectado?
+      '',     // L Ação Tomada
+      '',     // M Observação
+      'SIM'   // N A separação está correta?
+    ]]);
+
+    SpreadsheetApp.flush();
+
+    return {
+      ok: true,
+      mensagem: 'Conferência registrada na linha original do pedido.',
+      pedido: registro.pedido,
+      separador: registro.separador,
+      conferente: sessao
+    };
+  } finally {
+    lock.releaseLock();
   }
-
-  const aba = getSheet_(ABA_LANCAMENTOS);
-
-  // A:D não são tocadas.
-  aba.getRange(resultadoConsulta.linha, 5, 1, 10).setValues([[
-    sessao, // E Conferente
-    '',     // F SKU/Produto
-    '',     // G Qtd. Solicitada
-    '',     // H Qtd. Separada
-    '',     // I Tipo de Erro
-    '',     // J Gravidade
-    'Não',  // K Erro Detectado?
-    '',     // L Ação Tomada
-    '',     // M Observação
-    'Sim'   // N A separação está correta?
-  ]]);
-
-  return {
-    ok: true,
-    mensagem: 'Conferência registrada na linha original do pedido.',
-    pedido: resultadoConsulta.pedido,
-    separador: resultadoConsulta.separador,
-    conferente: sessao
-  };
 }
 
-/**
- * REGISTRO COM ERRO
- *
- * O primeiro SKU usa a linha original do pedido.
- * SKUs adicionais usam novas linhas e copiam A:D do pedido original.
- *
- * A data/turno copiados são os valores que já existiam na planilha.
- * Nenhuma data/hora é gerada pela conferência.
- */
 function registrarComErro_(body) {
   const sessao = obterSessao_(body);
 
@@ -284,144 +402,130 @@ function registrarComErro_(body) {
   }
 
   const pedido = normalizarTexto_(body.pedido);
-  const itens = Array.isArray(body.itens) ? body.itens : [];
-
-  if (!pedido) return { ok: false, erro: 'Pedido não informado.' };
-  if (itens.length === 0) {
-    return { ok: false, erro: 'Adicione pelo menos um SKU com erro.' };
-  }
-
-  const resultadoConsulta = consultarPedidoInterno_(pedido);
-
-  if (!resultadoConsulta.encontrado) {
-    return { ok: false, erro: 'Pedido não encontrado.' };
-  }
-
+  const sku = normalizarTexto_(body.sku);
+  const qtdSolicitada = normalizarNumero_(body.qtdSolicitada);
+  const qtdSeparada = normalizarNumero_(body.qtdSeparada);
   const tipoErro = normalizarTexto_(body.tipoErro);
   const gravidade = normalizarTexto_(body.gravidade);
   const acaoTomada = normalizarTexto_(body.acaoTomada);
   const observacao = normalizarTexto_(body.observacao);
 
-  if (!tipoErro) return { ok: false, erro: 'Informe o tipo de erro.' };
-  if (!gravidade) return { ok: false, erro: 'Informe a gravidade.' };
-  if (!acaoTomada) return { ok: false, erro: 'Informe a ação tomada.' };
+  if (!pedido) return { ok: false, erro: 'Pedido não informado.' };
+  if (!sku) return { ok: false, erro: 'Informe o SKU/produto.' };
 
-  const itensNormalizados = itens.map(item => {
-    const sku = normalizarTexto_(item.sku);
-    const qtdSolicitada = normalizarNumero_(item.qtdSolicitada);
-    const qtdSeparada = normalizarNumero_(item.qtdSeparada);
-
-    if (!sku) {
-      throw new Error('Existe um item sem SKU/Produto informado.');
-    }
-
-    if (qtdSolicitada === '' || qtdSeparada === '') {
-      throw new Error(
-        'Preencha as quantidades solicitada e separada de todos os itens.'
-      );
-    }
-
-    return { sku, qtdSolicitada, qtdSeparada };
-  });
-
-  const aba = getSheet_(ABA_LANCAMENTOS);
-  const primeiro = itensNormalizados[0];
-
-  // Primeiro SKU: linha original. A:D permanecem intactas.
-  aba.getRange(resultadoConsulta.linha, 5, 1, 10).setValues([[
-    sessao,                 // E Conferente
-    primeiro.sku,           // F SKU/Produto
-    primeiro.qtdSolicitada, // G
-    primeiro.qtdSeparada,   // H
-    tipoErro,               // I
-    gravidade,              // J
-    'Sim',                  // K Erro Detectado?
-    acaoTomada,             // L
-    observacao,             // M
-    'Não'                   // N A separação está correta?
-  ]]);
-
-  // SKUs adicionais: novas linhas, sem inventar data/hora.
-  if (itensNormalizados.length > 1) {
-    const linhasAdicionais = itensNormalizados.slice(1).map(item => [
-      resultadoConsulta.dataValor, // A original
-      resultadoConsulta.turno,     // B original
-      resultadoConsulta.pedido,    // C original
-      resultadoConsulta.separador, // D original
-      sessao,                      // E
-      item.sku,                    // F
-      item.qtdSolicitada,          // G
-      item.qtdSeparada,            // H
-      tipoErro,                    // I
-      gravidade,                   // J
-      'Sim',                       // K
-      acaoTomada,                  // L
-      observacao,                  // M
-      'Não'                        // N
-    ]);
-
-    const linhaInicial = aba.getLastRow() + 1;
-
-    aba.getRange(
-      linhaInicial,
-      1,
-      linhasAdicionais.length,
-      14
-    ).setValues(linhasAdicionais);
+  if (qtdSolicitada === '' || qtdSeparada === '') {
+    return {
+      ok: false,
+      erro: 'Informe as quantidades solicitada e separada.'
+    };
   }
 
-  return {
-    ok: true,
-    mensagem: 'Conferência com erro registrada.',
-    itensRegistrados: itensNormalizados.length,
-    pedido: resultadoConsulta.pedido,
-    separador: resultadoConsulta.separador,
-    conferente: sessao
-  };
+  if (!tipoErro) {
+    return { ok: false, erro: 'Informe o tipo de erro.' };
+  }
+
+  if (!gravidade) {
+    return { ok: false, erro: 'Informe a gravidade.' };
+  }
+
+  if (!acaoTomada) {
+    return { ok: false, erro: 'Informe a ação tomada.' };
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    const registro = localizarPedido_(pedido);
+
+    if (!registro || !registro.encontrado) {
+      return {
+        ok: false,
+        erro: 'Pedido não encontrado.'
+      };
+    }
+
+    if (registro.jaConferido) {
+      return {
+        ok: false,
+        jaConferido: true,
+        erro: 'O pedido ' + registro.pedido + ' já foi conferido.'
+      };
+    }
+
+    const aba = getSheet_(ABA_LANCAMENTOS);
+
+    // A:D permanecem intactas e nenhuma nova linha é criada.
+    // E:N recebem os dados da conferência.
+    aba.getRange(registro.linha, 5, 1, 10).setValues([[
+      sessao,          // E Conferente
+      sku,             // F SKU/Produto
+      qtdSolicitada,   // G Qtd. Solicitada
+      qtdSeparada,     // H Qtd. Separada
+      tipoErro,        // I Tipo de Erro
+      gravidade,       // J Gravidade
+      'SIM',           // K Erro Detectado?
+      acaoTomada,      // L Ação Tomada
+      observacao,      // M Observação
+      'NÃO'            // N A separação está correta?
+    ]]);
+
+    SpreadsheetApp.flush();
+
+    return {
+      ok: true,
+      mensagem: 'Conferência com erro registrada na linha original do pedido.',
+      pedido: registro.pedido,
+      separador: registro.separador,
+      conferente: sessao
+    };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
-/**
- * Procura o pedido na coluna C e devolve a linha exata.
- * O separador vem da coluna D da mesma linha.
- */
-function consultarPedidoInterno_(pedido) {
+function quantidadeConferencia_(conferente) {
+  const nome = normalizarTexto_(conferente);
+
+  if (!nome) {
+    return {
+      ok: true,
+      quantidade: 0
+    };
+  }
+
   const aba = getSheet_(ABA_LANCAMENTOS);
   const ultimaLinha = aba.getLastRow();
 
   if (ultimaLinha < 2) {
-    return { encontrado: false };
+    return {
+      ok: true,
+      quantidade: 0
+    };
   }
 
-  // Só A:D são necessários para identificar o pedido,
-  // pegar o separador e preservar os dados originais.
-  const dados = aba.getRange(
-    2,
-    1,
-    ultimaLinha - 1,
-    4
-  ).getDisplayValues();
+  const dados = aba
+    .getRange(2, 5, ultimaLinha - 1, 10)
+    .getDisplayValues();
 
-  const pedidoBusca = normalizarTexto_(pedido).toLowerCase();
+  let quantidade = 0;
 
-  for (let i = 0; i < dados.length; i++) {
-    const pedidoPlanilha =
-      normalizarTexto_(dados[i][2]).toLowerCase();
+  dados.forEach(linha => {
+    const nomeLinha = normalizarTexto_(linha[0]);
+    const resultado = normalizarTexto_(linha[9]).toUpperCase();
 
-    if (pedidoPlanilha === pedidoBusca) {
-      const linha = i + 2;
-
-      return {
-        encontrado: true,
-        linha,
-        dataValor: aba.getRange(linha, 1).getValue(),
-        turno: dados[i][1],
-        pedido: dados[i][2],
-        separador: dados[i][3]
-      };
+    if (
+      nomeLinha === nome &&
+      (resultado === 'SIM' || resultado === 'NÃO')
+    ) {
+      quantidade++;
     }
-  }
+  });
 
-  return { encontrado: false };
+  return {
+    ok: true,
+    quantidade: quantidade
+  };
 }
 
 function obterSessao_(body) {
@@ -468,6 +572,25 @@ function normalizarTexto_(valor) {
   return String(valor).trim();
 }
 
+function normalizarCabecalho_(valor) {
+  return normalizarTexto_(valor)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function normalizarPedido_(valor) {
+  const texto = normalizarTexto_(valor);
+
+  if (!texto) return '';
+
+  if (/^\d+$/.test(texto)) {
+    return texto.replace(/^0+/, '') || '0';
+  }
+
+  return texto.toUpperCase();
+}
+
 function normalizarNumero_(valor) {
   if (
     valor === null ||
@@ -477,7 +600,10 @@ function normalizarNumero_(valor) {
     return '';
   }
 
-  const texto = String(valor).trim().replace(',', '.');
+  const texto = String(valor)
+    .trim()
+    .replace(',', '.');
+
   const numero = Number(texto);
 
   if (!Number.isFinite(numero) || numero < 0) {
