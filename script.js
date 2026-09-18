@@ -1,4 +1,4 @@
-const API_URL = 'https://script.google.com/macros/s/AKfycbwlJAOQ8sPFkADagsvCfENQ5CilWGr9TsShXrw1fk5M_LlJA4wGj3yr9l32Pxlhg7c5tQ/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzmUBStoR7Y5LR52A8vV-yGAMGFcomsKXGDRoDmuvGcxtoK6Q9o5WGxyUR7Due3mUG22g/exec';
 
 let sessao = null;
 let nomeConferente = null;
